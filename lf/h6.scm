@@ -1,0 +1,221 @@
+;; IT-2105 Autumn 2006 Homework #6 Answer Key
+
+;; 1) n-of and do-times
+
+;; Do the same thing (call f) n times and collect the results
+(define (n-of n f)
+  (if (<= n 0) *nil*
+	  (cons (f) (n-of (- n 1) f))))
+
+(define (do-times n f)
+  (if (> n 0) 
+	 (begin 
+	   (f) 
+	   (do-times (- n 1) f))))
+
+;; 2)  Classifying cards, assuming the standard poker hands
+
+;; Hand rankings from weakest to strongest, with power list beside each
+;; 1) Highest card  - (1 val(high card), val(2nd high card) .... val(low-card))
+;; 2) Pair          - (2 val(pair) val(highest other card), val(next-highest-other-card)...)
+;; 3) 2 pairs       - (3 val(high pair) val(low pair) val(unpaired card))
+;; 4) 3 of a kind   - (4 val(triple) val(next high card) val(last card))
+;; 5) Straight      - (5 val(high card))
+;; 6) Flush	        - (6 val(high card) val(2nd card) ... val(5th card))
+;; 7) Full House    - (7 val(triple) val(pair))
+;; 8) 4 of a kind   - (8 (val quad))
+;; 9) Straight flush - (9 (val high card))
+
+;; Some auxiliary stuff so that card-playing code refers to "grouping cards" instead of "partitioning".
+
+(define (group-cards cards key eq-test) (partition cards key eq-test))
+
+(define (sort-group-cards cards key eq-test order-test)
+	 (sorted-partition cards key eq-test order-test))
+
+;; This builds the straight in descending order so that it can stop as soon as it gets one of sufficient length (target-len)
+
+(define (find-straight cards target-len)
+  (define (scan cards straight) 
+	 (cond ((< (+ (length cards) (length straight)) target-len) *nil*)
+	 		 ((= (length straight) target-len) straight)
+	       ((= (card-value (car cards)) (- (card-value (car straight)) 1))
+	          (scan (cdr cards) (cons (car cards) straight)))
+		    ((= (card-value (car cards)) (card-value (car straight)))
+			    (scan (cdr cards) straight))
+		    (else (scan (cdr cards) (list (car cards))))))
+		       
+  (let ((scards (sort-cards cards card-value >)))  ;; sorted (in descending value order) cards
+	 (scan (cdr scards) (list (car scards)))))
+
+;; This assumes that there is only one flush, which is a reasonable assumption in most
+;; poker games.  
+
+(define (find-flush cards target-len)
+  (let* ((groups (group-cards cards card-suit = ))
+	      (sgroups (merge-sort groups length >)))
+	(if (>= (length (car sgroups)) target-len)
+	    (car sgroups)
+		 *nil*)))
+
+;; Since a flush is worth more than a straight, once a flush is detected, we only need to check for
+;; a straight WITHIN the flush.  We don't need to check for non-flush straights. Ratings are 6 for a
+;; normal flush and 9 for a straight flush.
+
+;; The target-len is a standard, normally 5, for all hand evaluations.  Hence, straights and flushes need to
+;; have the same target-len in any type of poker, and at most target-len cards are used to compute the power of
+;; a group of cards.
+	    
+(define (calc-flush-power flush target-len)
+  (let ((str (find-straight flush target-len)))  ;; check for straight flush
+	 (cond (str (list 9 (apply max (map card-value str))))
+	       (else
+		      (let ((sorted-flush (sort-cards flush card-value >)))  ;; sort into descending card-value order
+				  (cons 6 (map card-value (firstn target-len sorted-flush))))))))
+
+(define (straight-flush? power) (= (car power) 9))
+
+;; This assumes that the straight is not a flush
+(define (calc-straight-power str) (list 5 (apply max (map card-value str))))
+(define (calc-4-kind-power quad) (list 8 (card-value (car quad))))  ;; quad is the four same-value cards
+(define (calc-full-house-power 2-groups) (cons 7 (map (lambda (g) (card-value (car g))) 2-groups)))
+  ;; No need to consider other cards, regardless of target-len, since there can be no ties with full houses.  If I have a
+  ;; full house with kings high, nobody else can have 3 kings.
+
+(define (calc-3-kind-power triple) (list 4 (card-value (car triple))))
+  ;; Again, no need for a lot of tie-breaker info with 3 of a kind.
+ 
+(define (calc-2-pair-power pairs other-cards target-len)
+	(cons 3 (append (map (lambda (pair) (card-value (car pair))) pairs)
+				       (map card-value (firstn (- target-len 4) (sort-cards other-cards card-value >))))))
+(define (calc-pair-power pair other-cards target-len)
+	(cons 2 (cons (card-value (car pair))
+					  (map card-value (firstn (- target-len 2) (sort-cards other-cards card-value >))))))
+(define (calc-high-card-power all-cards target-len)
+	(cons 1 (map card-value (firstn target-len (sort-cards all-cards card-value >)))))
+
+;; Although target-len is normally 5, by making it a variable, I can test the routine's ability to find
+;; large straights and flushes...just for fun!
+
+(define (calc-cards-power cards target-len)
+	(let* ((flush (find-flush cards target-len))
+	       (power (if flush (calc-flush-power flush target-len) (list 0))))
+	 (if (straight-flush? power)
+	     power
+	     (let* ((groups (merge-sort (group-cards cards card-value =) length >))  ;; group same-value cards and sort groups by size.
+			      (g1 (car groups))
+	            (g-len (length groups))
+	            (len (length g1)))
+		    (cond ((= len 4) (calc-4-kind-power g1))
+					 ((and (= len 3) (> g-len 1) (= (length (second groups)) 2)) (calc-full-house-power (firstn 2 groups)))
+			       (flush power) ;; power already calc'd when assessing straight flush possibility.
+		          (else
+				      (let ((str (find-straight cards target-len)))
+						  (cond (str (calc-straight-power str))
+								  ((and (= len 2) (> g-len 1) (= (length (second groups)) 2))
+										(calc-2-pair-power (firstn 2 groups) (flatten-partition (nthcdr 2 groups)) target-len))
+								  ((= len 2)
+										(calc-pair-power g1 (flatten-partition (cdr groups)) target-len))
+								  (else (calc-high-card-power cards target-len))))))))))
+
+(define (card-power-eq p1 p2)
+  (cond ((or (null? p1) (null? p2)) *t*)  ;; if we make it this far, they're equal
+	     ((= (car p1) (car p2))
+	        (card-power-eq (cdr p1) (cdr p2)))
+	     (else *nil*)))
+
+(define (card-power-gt p1 p2)
+  (cond ((or (null? p1) (null? p2)) *nil*)  ;; if we make it this far, they're equal, so p1 isn't less than p2
+	     ((= (car p1) (car p2))
+	        (card-power-gt (cdr p1) (cdr p2)))
+	     ((> (car p1) (car p2)) *t*)
+	     (else *nil*)))
+
+(define (power-test n)
+  (let* ((deck (gen-shuffled-deck))
+	      (hand (firstn n deck)))
+	(display (map card-name hand))
+	(display " Power: ") (display (calc-cards-power hand 5))))
+
+
+
+;; 3) Generating a deck closure.
+
+(define (gen-active-deck)
+  (let ((cards (gen-shuffled-deck)))
+	 (lambda (command)
+	  (cond ((eq? command 'init) (set! cards (gen-shuffled-deck)))
+		     ((eq? command 'get)
+	   	       (if cards
+	    			    (let ((card (car cards)))
+	      	          (set! cards (cdr cards))
+	       				  card)
+	     				*nil*))))))
+
+;; 4) Generating a card-player closure
+
+(define (gen-card-player)
+  (let ((hole-cards *nil*)
+	     (shared-cards *nil*)
+	     (power *nil*))
+	 (define (reset) (set! hole-cards *nil*) (set! power *nil*))
+	 (define (receive-card c) (set! hole-cards (cons c hole-cards)))
+	 (define (hand) (append hole-cards shared-cards))
+	 (define (pp-hand) (display (map card-name (hand))) (display " Power: ") (display (get-hand-power)))
+	 (define (get-hand-power) (or power 
+										  (begin (set! power (calc-cards-power (hand) 5))
+													power)))
+
+	(lambda (command . args)
+     (cond ((eq? command 'receive) (apply receive-card args))
+	        ((eq? command 'reset) (reset))
+	        ((eq? command 'share) (set! shared-cards (car args)))
+	        ((eq? command 'power) (get-hand-power))
+	        ((eq? command 'hand) (hand))
+	        ((eq? command 'pp-hand) (pp-hand))
+))))
+
+;; 5) Sorting routine for players based on the power of their hand
+
+(define (powersort-players players)
+  (merge-sort players
+	 (lambda (p) (p 'power))
+	 card-power-gt))
+	     
+;; 6) Generating a card-dealer closure
+
+(define (gen-card-dealer num-players)
+  (let ((players (n-of num-players gen-card-player))
+	     (deck (gen-active-deck))
+	     (flop *nil*))  ;; flop = the shared cards
+
+  (define (deal-card player) (player 'receive (deck 'get)))
+  (define (deal-round) (map deal-card players))
+  (define (deal-flop) (set! flop (cons (deck 'get) flop)))
+  (define (show-flop) (map (lambda (player) (player 'share flop)) players))
+  (define (pp-all-hands) (for-each (lambda (player) (player 'pp-hand) (newline)) players))
+  (define (powersort) (set! players (powersort-players players)))
+  (define (reset) 
+	  (map (lambda (player) (player 'reset)) players)
+	  (set! flop *nil*)
+	  (deck 'init))
+  (define (texas-hold-em)
+    (do-times 2 deal-round)
+	 (do-times 3 deal-flop) (show-flop)
+	 ;; betting
+	 (deal-flop) (show-flop)
+    ;; betting
+    (deal-flop) (show-flop)
+    ;; betting
+	 (powersort)
+    (pp-all-hands))
+	   
+    ;; Dispatcher
+	(lambda (command . args)
+	  (cond ((eq? command 'reset) (reset))
+	        ((eq? command 'texas) (texas-hold-em))))))
+
+
+	
+  
+ 

@@ -1,0 +1,13 @@
+; Note to self: font-lock mode
+; C-c C-e -> push buffer to scheme
+; (RESTART 1) <- clears errors
+; C-x C-f         open a new file
+; C-x C-s         save the current file
+; C-x C-c         exit the emacs (but save files first)
+
+
+; note to self: skel for recursive                                                                     |
+;(define (rec r)                                                                                       |
+;  (cond ((> r 0) (rec (- r 1)))                                                                       |
+;       (else 0)))                                                                                     |
+                        
